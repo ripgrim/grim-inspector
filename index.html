@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Grim Inspector</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        margin: 0;
+        padding: 2rem;
+        line-height: 1.6;
+        max-width: 800px;
+        margin: 0 auto;
+        color: #333;
+      }
+      h1 {
+        margin-bottom: 1rem;
+      }
+      p {
+        margin-bottom: 1rem;
+      }
+      .content {
+        margin-top: 2rem;
+      }
+      .button {
+        display: inline-block;
+        background-color: #3b82f6;
+        color: white;
+        text-decoration: none;
+        padding: 0.75rem 1.5rem;
+        border-radius: 0.25rem;
+        font-weight: 500;
+        transition: background-color 0.2s;
+      }
+      .button:hover {
+        background-color: #2563eb;
+      }
+      .button-secondary {
+        background-color: #e5e7eb;
+        color: #1f2937;
+      }
+      .button-secondary:hover {
+        background-color: #d1d5db;
+      }
+      .links {
+        display: flex;
+        gap: 1rem;
+        margin-top: 2rem;
+      }
+      code {
+        font-family: 'Fira Code', 'Courier New', monospace;
+        background-color: #f3f4f6;
+        padding: 0.2rem 0.4rem;
+        border-radius: 0.25rem;
+        font-size: 0.9rem;
+      }
+      pre {
+        background-color: #f3f4f6;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        overflow-x: auto;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Grim Inspector</h1>
+    <p>
+      A comprehensive debugging and inspection tool for web pages. This inspector provides real-time 
+      insights into your page's components, logs, errors, events, network activity, and performance metrics.
+    </p>
+    
+    <div class="links">
+      <a href="demo.html" class="button">View Demo</a>
+      <a href="https://github.com/yourusername/grim-inspector" class="button button-secondary">View on GitHub</a>
+    </div>
+    
+    <div class="content">
+      <h2>Installation</h2>
+      <p>Add this single line to your HTML file, right before the closing <code>&lt;/body&gt;</code> tag:</p>
+      <pre><code>&lt;script src="https://cdn.jsdelivr.net/gh/yourusername/grim-inspector@main/dist/grim-inspector.umd.js"&gt;&lt;/script&gt;</code></pre>
+      
+      <h2>Features</h2>
+      <ul>
+        <li><strong>Components Tab:</strong> Lists all sections and JavaScript components</li>
+        <li><strong>Logs Tab:</strong> Captures console logs for easy debugging</li>
+        <li><strong>Errors Tab:</strong> Displays console errors with stack traces</li>
+        <li><strong>Events Tab:</strong> Monitors DOM events and event listeners</li>
+        <li><strong>Network Tab:</strong> Tracks API calls and fetch requests</li>
+        <li><strong>Metrics Tab:</strong> Provides detailed performance metrics</li>
+      </ul>
+    </div>
+    
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

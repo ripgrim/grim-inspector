@@ -1,0 +1,45 @@
+{
+  "name": "grim-inspector",
+  "version": "1.0.0",
+  "description": "A comprehensive debugging and inspection tool for web pages",
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "main": "./dist/grim-inspector.umd.js",
+  "module": "./dist/grim-inspector.js",
+  "exports": {
+    ".": {
+      "import": "./dist/grim-inspector.js",
+      "require": "./dist/grim-inspector.umd.js"
+    },
+    "./style.css": "./dist/grim-inspector.css"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ripgrim/grim-inspector.git"
+  },
+  "keywords": [
+    "inspector",
+    "debugging",
+    "web-development",
+    "shopify",
+    "performance"
+  ],
+  "author": "grim",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/ripgrim/grim-inspector/issues"
+  },
+  "homepage": "https://github.com/ripgrim/grim-inspector#readme",
+  "devDependencies": {
+    "@types/node": "^22.14.0",
+    "typescript": "~5.7.2",
+    "vite": "^6.2.0"
+  }
+}
