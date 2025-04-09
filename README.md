@@ -2,7 +2,7 @@
 
 A comprehensive debugging and inspection tool for web pages. This inspector provides real-time insights into your page's components, logs, errors, events, network activity, and performance metrics.
 
-![Build Status](https://github.com/yourusername/grim-inspector/actions/workflows/build.yml/badge.svg)
+![Build Status](https://github.com/ripgrim/grim-inspector/actions/workflows/build.yml/badge.svg)
 
 ## Features
 
@@ -21,13 +21,13 @@ A comprehensive debugging and inspection tool for web pages. This inspector prov
 This option will always use the latest version from the GitHub repository:
 
 ```html
-<script src="https://cdn.jsdelivr.net/gh/yourusername/grim-inspector@main/dist/grim-inspector.umd.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/ripgrim/grim-inspector@main/dist/grim-inspector.umd.js"></script>
 ```
 
 For a specific version:
 
 ```html
-<script src="https://cdn.jsdelivr.net/gh/yourusername/grim-inspector@v1.0.0/dist/grim-inspector.umd.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/ripgrim/grim-inspector@v1.0.0/dist/grim-inspector.umd.js"></script>
 ```
 
 ### Option 2: Use from GitHub Pages
@@ -35,7 +35,7 @@ For a specific version:
 We automatically deploy to GitHub Pages on each push to main:
 
 ```html
-<script src="https://yourusername.github.io/grim-inspector/grim-inspector.umd.js"></script>
+<script src="https://ripgrim.github.io/grim-inspector/grim-inspector.umd.js"></script>
 ```
 
 ### Option 3: Manual download
@@ -116,7 +116,7 @@ This repository uses GitHub Actions to automatically build the project when chan
 4. Deploys to GitHub Pages (for easy linking)
 
 You can access the latest build at:
-- https://yourusername.github.io/grim-inspector/grim-inspector.umd.js
+- https://ripgrim.github.io/grim-inspector/grim-inspector.umd.js
 
 ## Development
 

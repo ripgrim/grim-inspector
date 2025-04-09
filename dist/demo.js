@@ -14,7 +14,7 @@
     scriptUrl = '/dist/grim-inspector.umd.js';
   } else {
     // Fallback to CDN
-    scriptUrl = 'https://cdn.jsdelivr.net/gh/yourusername/grim-inspector@main/dist/grim-inspector.umd.js';
+    scriptUrl = 'https://cdn.jsdelivr.net/gh/ripgrim/grim-inspector@main/dist/grim-inspector.umd.js';
   }
   
   // Create and append the script element
@@ -28,7 +28,7 @@
     if (!scriptUrl.includes('cdn.jsdelivr.net')) {
       console.log('Falling back to CDN...');
       const fallbackScript = document.createElement('script');
-      fallbackScript.src = 'https://cdn.jsdelivr.net/gh/yourusername/grim-inspector@main/dist/grim-inspector.umd.js';
+      fallbackScript.src = 'https://cdn.jsdelivr.net/gh/ripgrim/grim-inspector@main/dist/grim-inspector.umd.js';
       fallbackScript.defer = true;
       document.body.appendChild(fallbackScript);
     }
