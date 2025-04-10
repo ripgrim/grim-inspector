@@ -93,7 +93,7 @@
   <footer class="footer">
     <p>Check the blue inspector button in the bottom-right corner to access the debug panel</p>
     <p>View this project on <a href="https://github.com/ripgrim/grim-inspector">GitHub</a></p>
-    <p><a href="index.html">Back to home</a></p>
+    <p><a href="../index.html">Back to home</a></p>
   </footer>
   
   <script>
@@ -151,5 +151,19 @@
   
   <!-- Load the Grim Inspector -->
   <script src="demo.js"></script>
+  
+  <!-- Direct script include fallback -->
+  <script>
+    // Wait a bit and check if inspector loaded
+    setTimeout(function() {
+      if (!window.GrimInspector) {
+        console.log("Fallback to direct CDN link");
+        const script = document.createElement('script');
+        script.src = "https://cdn.jsdelivr.net/gh/ripgrim/grim-inspector@main/dist/grim-inspector.umd.js";
+        script.type = "text/javascript";
+        document.body.appendChild(script);
+      }
+    }, 2000);
+  </script>
 </body>
 </html> 

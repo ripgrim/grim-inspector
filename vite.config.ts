@@ -8,11 +8,12 @@ export default defineConfig({
     lib: {
       entry: './src/main.ts',
       name: 'GrimInspector',
-      fileName: 'grim-inspector'
+      fileName: (format) => `grim-inspector.${format}.js`
     },
     cssCodeSplit: false,
     rollupOptions: {
       output: {
+        format: 'umd',
         assetFileNames: (assetInfo) => {
           if (assetInfo.name === 'style.css') return 'grim-inspector.css';
           return assetInfo.name || 'asset-[hash]';

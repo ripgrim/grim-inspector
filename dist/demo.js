@@ -13,14 +13,17 @@
     // Use the local development version
     scriptUrl = '/dist/grim-inspector.umd.js';
   } else {
-    // Fallback to CDN
+    // Fallback to CDN - ensure correct branch and file extension
     scriptUrl = 'https://cdn.jsdelivr.net/gh/ripgrim/grim-inspector@main/dist/grim-inspector.umd.js';
   }
+  
+  console.log('Loading inspector from:', scriptUrl);
   
   // Create and append the script element
   const script = document.createElement('script');
   script.src = scriptUrl;
   script.defer = true;
+  script.type = 'text/javascript'; // Explicitly set MIME type
   script.onerror = function() {
     console.error('Failed to load Grim Inspector script from', scriptUrl);
     
@@ -29,6 +32,7 @@
       console.log('Falling back to CDN...');
       const fallbackScript = document.createElement('script');
       fallbackScript.src = 'https://cdn.jsdelivr.net/gh/ripgrim/grim-inspector@main/dist/grim-inspector.umd.js';
+      fallbackScript.type = 'text/javascript'; // Explicitly set MIME type
       fallbackScript.defer = true;
       document.body.appendChild(fallbackScript);
     }
