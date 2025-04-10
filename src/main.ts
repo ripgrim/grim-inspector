@@ -20,6 +20,8 @@ interface NetworkEntry {
   contentType?: string;
   timestamp: string;
   duration?: number;
+  requestData?: any;
+  responseData?: any;
 }
 
 interface Component {
@@ -356,6 +358,9 @@ class GrimInspector {
   private events: EventEntry[] = [];
   private network: NetworkEntry[] = [];
   private metrics: PerformanceMetrics = {};
+  private _errorPagination: { currentPage: number } | null = null;
+  private _logPagination: { currentPage: number } | null = null;
+  private _networkPagination: { currentPage: number } | null = null;
 
   constructor() {
     // Create container for our widget
@@ -490,37 +495,53 @@ class GrimInspector {
       }
     });
     
-    // Refresh content using a small delay for events tab to avoid blocking the UI
-    if (tabName === 'events') {
-      // Show a loading message first
-      const contentElement = this.panel.querySelector(`.grim-inspector-tab-content[data-content="events"]`) as HTMLElement;
-      if (contentElement) {
+    // Get the current active content
+    const contentElement = this.panel.querySelector(`.grim-inspector-tab-content[data-content="${tabName}"]`) as HTMLElement;
+    
+    // Check if the tab might be heavy to render
+    const potentiallyHeavyTabs = ['events', 'errors', 'network'];
+    const isHeavyTab = potentiallyHeavyTabs.includes(tabName);
+    
+    if (contentElement) {
+      // If it's a potentially heavy tab, show loading indicator first
+      if (isHeavyTab) {
         // Clear content except empty state
+        const emptyState = contentElement.querySelector('.grim-inspector-empty-state');
         Array.from(contentElement.children).forEach(child => {
           if (!child.classList.contains('grim-inspector-empty-state')) {
             child.remove();
           }
         });
         
-        // Add loading indicator
-        const loading = document.createElement('div');
-        loading.style.display = 'flex';
-        loading.style.justifyContent = 'center';
-        loading.style.alignItems = 'center';
-        loading.style.height = '100%';
-        loading.style.color = '#6b7280';
-        loading.textContent = 'Loading events...';
-        contentElement.appendChild(loading);
+        // Check if tab has data that needs rendering
+        let hasData = false;
+        if (tabName === 'events' && this.events.length > 0) hasData = true;
+        if (tabName === 'errors' && this.errors.length > 0) hasData = true;
+        if (tabName === 'network' && this.network.length > 0) hasData = true;
         
-        // Refresh content after a short delay
-        setTimeout(() => {
-          this.refreshTabContent(tabName);
-        }, 50);
+        // Only show loading if there's data to render
+        if (hasData) {
+          // Add loading indicator
+          const loading = document.createElement('div');
+          loading.style.display = 'flex';
+          loading.style.justifyContent = 'center';
+          loading.style.alignItems = 'center';
+          loading.style.height = '100px';
+          loading.style.color = '#6b7280';
+          loading.textContent = `Loading ${tabName}...`;
+          contentElement.appendChild(loading);
+          
+          // Use timeout to avoid freezing UI
+          setTimeout(() => {
+            this.refreshTabContent(tabName);
+          }, 50);
+          return;
+        }
       }
-    } else {
-      // Refresh other tabs immediately
-      this.refreshTabContent(tabName);
     }
+    
+    // For non-heavy tabs or tabs without data, refresh immediately
+    this.refreshTabContent(tabName);
   }
   
   private refreshTabContent(tabName: string): void {
@@ -567,6 +588,39 @@ class GrimInspector {
       }
     });
     
+    // Add search and filter capabilities
+    const controlsContainer = document.createElement('div');
+    controlsContainer.style.marginBottom = '15px';
+    controlsContainer.style.display = 'flex';
+    controlsContainer.style.gap = '10px';
+    controlsContainer.style.alignItems = 'center';
+    controlsContainer.style.flexWrap = 'wrap';
+    
+    // Search box
+    const searchContainer = document.createElement('div');
+    searchContainer.style.flex = '1';
+    searchContainer.style.minWidth = '200px';
+    
+    const searchInput = document.createElement('input');
+    searchInput.type = 'text';
+    searchInput.placeholder = 'Search components...';
+    searchInput.style.width = '100%';
+    searchInput.style.padding = '6px 10px';
+    searchInput.style.borderRadius = '4px';
+    searchInput.style.border = '1px solid #e5e7eb';
+    searchInput.style.fontSize = '14px';
+    
+    searchContainer.appendChild(searchInput);
+    controlsContainer.appendChild(searchContainer);
+    
+    const statsContainer = document.createElement('div');
+    statsContainer.style.fontSize = '12px';
+    statsContainer.style.color = '#6b7280';
+    statsContainer.textContent = `${this.components.length} components found`;
+    controlsContainer.appendChild(statsContainer);
+    
+    contentElement.appendChild(controlsContainer);
+    
     // Group components by type
     const groupedComponents: Record<string, Component[]> = {};
     
@@ -582,11 +636,23 @@ class GrimInspector {
     const componentsContainer = document.createElement('div');
     componentsContainer.classList.add('grim-inspector-components-container');
     
+    // Counter for lazy loading
+    let sectionCount = 0;
+    const INITIAL_SECTIONS_TO_SHOW = 2; // Show only first two sections initially
+    
+    // For very large component sets, use a virtualized approach
+    const MAX_COMPONENTS_PER_SECTION = 20;
+    
     // Create sections for each component type
     Object.entries(groupedComponents).forEach(([type, components]) => {
       const section = document.createElement('div');
       section.classList.add('grim-inspector-component-section');
       section.style.marginBottom = '20px';
+      section.dataset.componentType = type;
+      
+      const sectionHeader = document.createElement('div');
+      sectionHeader.style.cursor = 'pointer';
+      sectionHeader.style.userSelect = 'none';
       
       const sectionTitle = document.createElement('h3');
       sectionTitle.style.fontSize = '14px';
@@ -594,6 +660,9 @@ class GrimInspector {
       sectionTitle.style.marginBottom = '10px';
       sectionTitle.style.padding = '0 0 5px 0';
       sectionTitle.style.borderBottom = '1px solid #e5e7eb';
+      sectionTitle.style.display = 'flex';
+      sectionTitle.style.justifyContent = 'space-between';
+      sectionTitle.style.alignItems = 'center';
       
       // Format type for display
       let displayType = type.charAt(0).toUpperCase() + type.slice(1);
@@ -607,82 +676,251 @@ class GrimInspector {
         displayType = `${displayType}s`;
       }
       
-      sectionTitle.textContent = displayType;
-      section.appendChild(sectionTitle);
+      const titleText = document.createElement('span');
+      titleText.textContent = `${displayType} (${components.length})`;
       
-      // Add components
-      components.forEach(component => {
-        const item = document.createElement('div');
-        item.classList.add('grim-inspector-component-item');
-        item.style.padding = '10px';
-        item.style.borderRadius = '6px';
-        item.style.marginBottom = '8px';
-        item.style.background = '#f9fafb';
+      const expandIcon = document.createElement('span');
+      expandIcon.textContent = sectionCount < INITIAL_SECTIONS_TO_SHOW ? '▼' : '▶';
+      expandIcon.style.fontSize = '12px';
+      
+      sectionTitle.appendChild(titleText);
+      sectionTitle.appendChild(expandIcon);
+      sectionHeader.appendChild(sectionTitle);
+      section.appendChild(sectionHeader);
+      
+      // Create container for components
+      const componentsListContainer = document.createElement('div');
+      componentsListContainer.style.display = sectionCount < INITIAL_SECTIONS_TO_SHOW ? 'block' : 'none';
+      componentsListContainer.dataset.expanded = sectionCount < INITIAL_SECTIONS_TO_SHOW ? 'true' : 'false';
+      
+      // Handle large component lists
+      let displayedComponents = components;
+      
+      // If there are too many components, show a subset and add "Show More" button
+      if (components.length > MAX_COMPONENTS_PER_SECTION) {
+        displayedComponents = components.slice(0, MAX_COMPONENTS_PER_SECTION);
         
-        const header = document.createElement('div');
-        header.style.display = 'flex';
-        header.style.justifyContent = 'space-between';
-        header.style.alignItems = 'flex-start';
+        const showMoreContainer = document.createElement('div');
+        showMoreContainer.style.textAlign = 'center';
+        showMoreContainer.style.padding = '10px 0';
         
-        const nameEl = document.createElement('div');
-        nameEl.style.fontWeight = '500';
-        nameEl.textContent = component.name;
+        const showMoreButton = document.createElement('button');
+        showMoreButton.classList.add('grim-inspector-btn', 'grim-inspector-btn-ghost');
+        showMoreButton.textContent = `Show ${components.length - MAX_COMPONENTS_PER_SECTION} More`;
+        showMoreButton.style.fontSize = '12px';
         
-        const badges = document.createElement('div');
-        badges.style.display = 'flex';
-        badges.style.gap = '5px';
+        showMoreButton.addEventListener('click', () => {
+          // When clicked, render all components
+          componentsListContainer.innerHTML = '';
+          this.renderComponentItems(components, componentsListContainer);
+          showMoreContainer.remove();
+        });
         
-        // Add async/defer badges if applicable
-        if (component.isAsync) {
-          const asyncBadge = document.createElement('span');
-          asyncBadge.style.fontSize = '10px';
-          asyncBadge.style.padding = '2px 5px';
-          asyncBadge.style.borderRadius = '4px';
-          asyncBadge.style.backgroundColor = 'rgba(16, 185, 129, 0.1)';
-          asyncBadge.style.color = '#10b981';
-          asyncBadge.textContent = 'async';
-          
-          badges.appendChild(asyncBadge);
-        }
-        
-        if (component.isDeferred) {
-          const deferBadge = document.createElement('span');
-          deferBadge.style.fontSize = '10px';
-          deferBadge.style.padding = '2px 5px';
-          deferBadge.style.borderRadius = '4px';
-          deferBadge.style.backgroundColor = 'rgba(59, 130, 246, 0.1)';
-          deferBadge.style.color = '#3b82f6';
-          deferBadge.textContent = 'defer';
-          
-          badges.appendChild(deferBadge);
-        }
-        
-        header.appendChild(nameEl);
-        header.appendChild(badges);
-        
-        // Add path information if available
-        if (component.path) {
-          const pathEl = document.createElement('div');
-          pathEl.style.fontSize = '11px';
-          pathEl.style.color = '#6b7280';
-          pathEl.style.marginTop = '5px';
-          pathEl.style.fontFamily = "'Fira Code', monospace";
-          pathEl.style.wordBreak = 'break-all';
-          pathEl.textContent = component.path;
-          
-          item.appendChild(header);
-          item.appendChild(pathEl);
-        } else {
-          item.appendChild(header);
-        }
-        
-        section.appendChild(item);
+        showMoreContainer.appendChild(showMoreButton);
+        componentsListContainer.appendChild(this.renderComponentItems(displayedComponents, document.createElement('div')));
+        componentsListContainer.appendChild(showMoreContainer);
+      } else {
+        // Render all components if under the limit
+        this.renderComponentItems(components, componentsListContainer);
+      }
+      
+      // Toggle section expansion on click
+      sectionHeader.addEventListener('click', () => {
+        const isExpanded = componentsListContainer.dataset.expanded === 'true';
+        componentsListContainer.style.display = isExpanded ? 'none' : 'block';
+        componentsListContainer.dataset.expanded = isExpanded ? 'false' : 'true';
+        expandIcon.textContent = isExpanded ? '▶' : '▼';
       });
       
+      section.appendChild(componentsListContainer);
       componentsContainer.appendChild(section);
+      
+      sectionCount++;
     });
     
     contentElement.appendChild(componentsContainer);
+    
+    // Add search functionality
+    searchInput.addEventListener('input', (e) => {
+      const searchTerm = (e.target as HTMLInputElement).value.toLowerCase();
+      
+      // Get all component items
+      const items = contentElement.querySelectorAll('.grim-inspector-component-item');
+      const sections = contentElement.querySelectorAll('.grim-inspector-component-section');
+      
+      if (searchTerm === '') {
+        // Reset everything if search is cleared
+        items.forEach(item => {
+          (item as HTMLElement).style.display = 'block';
+        });
+        
+        // Reset section visibility and counters
+        sections.forEach((section, index) => {
+          (section as HTMLElement).style.display = 'block';
+          const expandIcon = section.querySelector('h3 span:last-child');
+          const componentsContainer = section.querySelector('div[data-expanded]');
+          
+          if (index < INITIAL_SECTIONS_TO_SHOW) {
+            (componentsContainer as HTMLElement).style.display = 'block';
+            (componentsContainer as HTMLElement).dataset.expanded = 'true';
+            expandIcon.textContent = '▼';
+          } else {
+            (componentsContainer as HTMLElement).style.display = 'none';
+            (componentsContainer as HTMLElement).dataset.expanded = 'false';
+            expandIcon.textContent = '▶';
+          }
+          
+          // Update the counter
+          const titleText = section.querySelector('h3 span:first-child');
+          const type = (section as HTMLElement).dataset.componentType;
+          let displayType = type.charAt(0).toUpperCase() + type.slice(1);
+          if (type === 'shopify-section') {
+            displayType = 'Shopify Sections';
+          } else if (type === 'library') {
+            displayType = 'Libraries';
+          } else if (type === 'shopify') {
+            displayType = 'Shopify Scripts';
+          } else {
+            displayType = `${displayType}s`;
+          }
+          
+          const componentCount = section.querySelectorAll('.grim-inspector-component-item').length;
+          titleText.textContent = `${displayType} (${componentCount})`;
+        });
+        
+        // Update the stats
+        statsContainer.textContent = `${this.components.length} components found`;
+        return;
+      }
+      
+      // Track statistics
+      let matchedCount = 0;
+      
+      // Check each component against search
+      items.forEach(item => {
+        const name = item.querySelector('div[style*="font-weight: 500"]').textContent.toLowerCase();
+        const path = item.querySelector('div[style*="font-family"]')?.textContent?.toLowerCase() || '';
+        
+        if (name.includes(searchTerm) || path.includes(searchTerm)) {
+          (item as HTMLElement).style.display = 'block';
+          matchedCount++;
+        } else {
+          (item as HTMLElement).style.display = 'none';
+        }
+      });
+      
+      // Update section visibility and expand all that have matches
+      sections.forEach(section => {
+        const visibleItems = Array.from(section.querySelectorAll('.grim-inspector-component-item'))
+          .filter(item => (item as HTMLElement).style.display !== 'none');
+        
+        if (visibleItems.length === 0) {
+          (section as HTMLElement).style.display = 'none';
+        } else {
+          (section as HTMLElement).style.display = 'block';
+          
+          // Expand the section if it has matches
+          const expandIcon = section.querySelector('h3 span:last-child');
+          const componentsContainer = section.querySelector('div[data-expanded]');
+          
+          (componentsContainer as HTMLElement).style.display = 'block';
+          (componentsContainer as HTMLElement).dataset.expanded = 'true';
+          expandIcon.textContent = '▼';
+          
+          // Update the counter to show only matching items
+          const titleText = section.querySelector('h3 span:first-child');
+          const type = (section as HTMLElement).dataset.componentType;
+          let displayType = type.charAt(0).toUpperCase() + type.slice(1);
+          if (type === 'shopify-section') {
+            displayType = 'Shopify Sections';
+          } else if (type === 'library') {
+            displayType = 'Libraries';
+          } else if (type === 'shopify') {
+            displayType = 'Shopify Scripts';
+          } else {
+            displayType = `${displayType}s`;
+          }
+          
+          titleText.textContent = `${displayType} (${visibleItems.length})`;
+        }
+      });
+      
+      // Update stats
+      statsContainer.textContent = `${matchedCount} of ${this.components.length} components found`;
+    });
+  }
+  
+  // Helper function to render component items
+  private renderComponentItems(components: Component[], container: HTMLElement): HTMLElement {
+    components.forEach(component => {
+      const item = document.createElement('div');
+      item.classList.add('grim-inspector-component-item');
+      item.style.padding = '10px';
+      item.style.borderRadius = '6px';
+      item.style.marginBottom = '8px';
+      item.style.background = '#f9fafb';
+      
+      const header = document.createElement('div');
+      header.style.display = 'flex';
+      header.style.justifyContent = 'space-between';
+      header.style.alignItems = 'flex-start';
+      
+      const nameEl = document.createElement('div');
+      nameEl.style.fontWeight = '500';
+      nameEl.textContent = component.name;
+      
+      const badges = document.createElement('div');
+      badges.style.display = 'flex';
+      badges.style.gap = '5px';
+      
+      // Add async/defer badges if applicable
+      if (component.isAsync) {
+        const asyncBadge = document.createElement('span');
+        asyncBadge.style.fontSize = '10px';
+        asyncBadge.style.padding = '2px 5px';
+        asyncBadge.style.borderRadius = '4px';
+        asyncBadge.style.backgroundColor = 'rgba(16, 185, 129, 0.1)';
+        asyncBadge.style.color = '#10b981';
+        asyncBadge.textContent = 'async';
+        
+        badges.appendChild(asyncBadge);
+      }
+      
+      if (component.isDeferred) {
+        const deferBadge = document.createElement('span');
+        deferBadge.style.fontSize = '10px';
+        deferBadge.style.padding = '2px 5px';
+        deferBadge.style.borderRadius = '4px';
+        deferBadge.style.backgroundColor = 'rgba(59, 130, 246, 0.1)';
+        deferBadge.style.color = '#3b82f6';
+        deferBadge.textContent = 'defer';
+        
+        badges.appendChild(deferBadge);
+      }
+      
+      header.appendChild(nameEl);
+      header.appendChild(badges);
+      
+      // Add path information if available
+      if (component.path) {
+        const pathEl = document.createElement('div');
+        pathEl.style.fontSize = '11px';
+        pathEl.style.color = '#6b7280';
+        pathEl.style.marginTop = '5px';
+        pathEl.style.fontFamily = "'Fira Code', monospace";
+        pathEl.style.wordBreak = 'break-all';
+        pathEl.textContent = component.path;
+        
+        item.appendChild(header);
+        item.appendChild(pathEl);
+      } else {
+        item.appendChild(header);
+      }
+      
+      container.appendChild(item);
+    });
+    
+    return container;
   }
   
   private renderLogsTab(contentElement: HTMLElement, emptyState: HTMLElement): void {
@@ -704,14 +942,82 @@ class GrimInspector {
     const toolbar = document.createElement('div');
     toolbar.classList.add('grim-inspector-toolbar');
     toolbar.style.display = 'flex';
-    toolbar.style.justifyContent = 'flex-end';
+    toolbar.style.justifyContent = 'space-between';
     toolbar.style.marginBottom = '10px';
+    
+    // Add pagination info
+    const pageInfo = document.createElement('div');
+    pageInfo.style.fontSize = '12px';
+    pageInfo.style.color = '#6b7280';
+    
+    // Only show a page of logs at a time to prevent freezing - max 20 at a time
+    const MAX_LOGS_PER_PAGE = 20;
+    const totalLogs = this.logs.length;
+    const totalPages = Math.ceil(totalLogs / MAX_LOGS_PER_PAGE);
+    
+    // Add pagination state
+    if (!this._logPagination) {
+      this._logPagination = { currentPage: 1 };
+    }
+    
+    // Ensure current page is valid
+    if (this._logPagination.currentPage > totalPages) {
+      this._logPagination.currentPage = 1;
+    }
+    
+    const currentPage = this._logPagination.currentPage;
+    
+    if (totalLogs > MAX_LOGS_PER_PAGE) {
+      pageInfo.textContent = `Showing ${MAX_LOGS_PER_PAGE} of ${totalLogs} logs (Page ${currentPage}/${totalPages})`;
+      toolbar.appendChild(pageInfo);
+    }
+    
+    // Add pagination controls if needed
+    if (totalPages > 1) {
+      const paginationControls = document.createElement('div');
+      paginationControls.style.display = 'flex';
+      paginationControls.style.gap = '8px';
+      paginationControls.style.marginRight = '10px';
+      
+      const prevButton = document.createElement('button');
+      prevButton.classList.add('grim-inspector-btn', 'grim-inspector-btn-ghost');
+      prevButton.textContent = '← Prev';
+      prevButton.style.fontSize = '12px';
+      prevButton.style.padding = '4px 8px';
+      prevButton.disabled = currentPage === 1;
+      prevButton.style.opacity = currentPage === 1 ? '0.5' : '1';
+      prevButton.addEventListener('click', () => {
+        if (currentPage > 1) {
+          this._logPagination.currentPage--;
+          this.renderLogsTab(contentElement, emptyState);
+        }
+      });
+      
+      const nextButton = document.createElement('button');
+      nextButton.classList.add('grim-inspector-btn', 'grim-inspector-btn-ghost');
+      nextButton.textContent = 'Next →';
+      nextButton.style.fontSize = '12px';
+      nextButton.style.padding = '4px 8px';
+      nextButton.disabled = currentPage === totalPages;
+      nextButton.style.opacity = currentPage === totalPages ? '0.5' : '1';
+      nextButton.addEventListener('click', () => {
+        if (currentPage < totalPages) {
+          this._logPagination.currentPage++;
+          this.renderLogsTab(contentElement, emptyState);
+        }
+      });
+      
+      paginationControls.appendChild(prevButton);
+      paginationControls.appendChild(nextButton);
+      toolbar.appendChild(paginationControls);
+    }
     
     const clearButton = document.createElement('button');
     clearButton.classList.add('grim-inspector-btn', 'grim-inspector-btn-ghost');
     clearButton.textContent = 'Clear Logs';
     clearButton.addEventListener('click', () => {
       this.logs = [];
+      this._logPagination = { currentPage: 1 };
       this.refreshTabContent('logs');
     });
     
@@ -722,8 +1028,15 @@ class GrimInspector {
     const logsContainer = document.createElement('div');
     logsContainer.classList.add('grim-inspector-logs-container');
     
-    // Add each log entry
-    this.logs.slice().reverse().forEach(log => {
+    // Calculate slice of logs to show based on current page
+    const startIndex = (currentPage - 1) * MAX_LOGS_PER_PAGE;
+    const endIndex = Math.min(startIndex + MAX_LOGS_PER_PAGE, totalLogs);
+    
+    // Only render visible logs for current page
+    const visibleLogs = this.logs.slice().reverse().slice(startIndex, endIndex);
+    
+    // Add each log entry for the current page only
+    visibleLogs.forEach(log => {
       const entry = document.createElement('div');
       entry.classList.add('grim-inspector-entry');
       
@@ -768,8 +1081,33 @@ class GrimInspector {
       header.appendChild(typeSpan);
       header.appendChild(timeSpan);
       
+      // For very long log messages, truncate them initially
+      const isVeryLong = log.message && log.message.length > 1000;
+      
       const message = document.createElement('div');
-      message.textContent = log.message;
+      
+      if (isVeryLong) {
+        // For long messages, show a truncated version with an expand option
+        const truncatedMessage = log.message.substring(0, 1000) + '...';
+        message.textContent = truncatedMessage;
+        
+        const expandButton = document.createElement('button');
+        expandButton.classList.add('grim-inspector-btn', 'grim-inspector-btn-ghost');
+        expandButton.textContent = 'Show Full Message';
+        expandButton.style.fontSize = '10px';
+        expandButton.style.marginTop = '5px';
+        expandButton.style.display = 'block';
+        expandButton.addEventListener('click', () => {
+          message.textContent = log.message;
+          expandButton.style.display = 'none';
+        });
+        
+        const expandContainer = document.createElement('div');
+        expandContainer.appendChild(expandButton);
+        message.appendChild(expandContainer);
+      } else {
+        message.textContent = log.message;
+      }
       
       const actions = document.createElement('div');
       actions.style.marginTop = '5px';
@@ -823,14 +1161,82 @@ class GrimInspector {
     const toolbar = document.createElement('div');
     toolbar.classList.add('grim-inspector-toolbar');
     toolbar.style.display = 'flex';
-    toolbar.style.justifyContent = 'flex-end';
+    toolbar.style.justifyContent = 'space-between';
     toolbar.style.marginBottom = '10px';
+    
+    // Add pagination info if needed
+    const pageInfo = document.createElement('div');
+    pageInfo.style.fontSize = '12px';
+    pageInfo.style.color = '#6b7280';
+    
+    // Only show most recent errors to prevent freezing - max 15 at a time
+    const MAX_ERRORS_PER_PAGE = 15;
+    const totalErrors = this.errors.length;
+    const totalPages = Math.ceil(totalErrors / MAX_ERRORS_PER_PAGE);
+    
+    // Add pagination state
+    if (!this._errorPagination) {
+      this._errorPagination = { currentPage: 1 };
+    }
+    
+    // Ensure current page is valid
+    if (this._errorPagination.currentPage > totalPages) {
+      this._errorPagination.currentPage = 1;
+    }
+    
+    const currentPage = this._errorPagination.currentPage;
+    
+    if (totalErrors > MAX_ERRORS_PER_PAGE) {
+      pageInfo.textContent = `Showing ${MAX_ERRORS_PER_PAGE} of ${totalErrors} errors (Page ${currentPage}/${totalPages})`;
+      toolbar.appendChild(pageInfo);
+    }
+    
+    // Add pagination controls if needed
+    if (totalPages > 1) {
+      const paginationControls = document.createElement('div');
+      paginationControls.style.display = 'flex';
+      paginationControls.style.gap = '8px';
+      paginationControls.style.marginRight = '10px';
+      
+      const prevButton = document.createElement('button');
+      prevButton.classList.add('grim-inspector-btn', 'grim-inspector-btn-ghost');
+      prevButton.textContent = '← Prev';
+      prevButton.style.fontSize = '12px';
+      prevButton.style.padding = '4px 8px';
+      prevButton.disabled = currentPage === 1;
+      prevButton.style.opacity = currentPage === 1 ? '0.5' : '1';
+      prevButton.addEventListener('click', () => {
+        if (currentPage > 1) {
+          this._errorPagination.currentPage--;
+          this.renderErrorsTab(contentElement, emptyState);
+        }
+      });
+      
+      const nextButton = document.createElement('button');
+      nextButton.classList.add('grim-inspector-btn', 'grim-inspector-btn-ghost');
+      nextButton.textContent = 'Next →';
+      nextButton.style.fontSize = '12px';
+      nextButton.style.padding = '4px 8px';
+      nextButton.disabled = currentPage === totalPages;
+      nextButton.style.opacity = currentPage === totalPages ? '0.5' : '1';
+      nextButton.addEventListener('click', () => {
+        if (currentPage < totalPages) {
+          this._errorPagination.currentPage++;
+          this.renderErrorsTab(contentElement, emptyState);
+        }
+      });
+      
+      paginationControls.appendChild(prevButton);
+      paginationControls.appendChild(nextButton);
+      toolbar.appendChild(paginationControls);
+    }
     
     const clearButton = document.createElement('button');
     clearButton.classList.add('grim-inspector-btn', 'grim-inspector-btn-ghost');
     clearButton.textContent = 'Clear All';
     clearButton.addEventListener('click', () => {
       this.errors = [];
+      this._errorPagination = { currentPage: 1 };
       this.refreshTabContent('errors');
     });
     
@@ -841,8 +1247,15 @@ class GrimInspector {
     const errorsContainer = document.createElement('div');
     errorsContainer.classList.add('grim-inspector-errors-container');
     
+    // Calculate slice of errors to show based on current page
+    const startIndex = (currentPage - 1) * MAX_ERRORS_PER_PAGE;
+    const endIndex = Math.min(startIndex + MAX_ERRORS_PER_PAGE, totalErrors);
+    
+    // Only render visible errors for current page
+    const visibleErrors = this.errors.slice().reverse().slice(startIndex, endIndex);
+    
     // Add each error entry
-    this.errors.slice().reverse().forEach(error => {
+    visibleErrors.forEach(error => {
       const entry = document.createElement('div');
       entry.classList.add('grim-inspector-entry', 'grim-inspector-entry-error');
       
@@ -870,18 +1283,73 @@ class GrimInspector {
       message.textContent = error.message;
       message.style.marginBottom = '8px';
       
-      // Add stack trace if available
+      // Add stack trace if available - but limit its initial display
       if (error.stack) {
-        const stackContainer = document.createElement('pre');
-        stackContainer.classList.add('grim-inspector-code');
-        stackContainer.textContent = error.stack;
-        
         const stackHeader = document.createElement('div');
         stackHeader.style.fontSize = '11px';
         stackHeader.style.fontWeight = '500';
         stackHeader.style.marginTop = '8px';
         stackHeader.style.color = '#4b5563';
-        stackHeader.textContent = 'Stack Trace:';
+        stackHeader.style.display = 'flex';
+        stackHeader.style.justifyContent = 'space-between';
+        stackHeader.style.alignItems = 'center';
+        stackHeader.style.cursor = 'pointer';
+        
+        const stackLabel = document.createElement('span');
+        stackLabel.textContent = 'Stack Trace:';
+        
+        const toggleButton = document.createElement('span');
+        toggleButton.style.fontSize = '10px';
+        toggleButton.style.color = '#3b82f6';
+        toggleButton.textContent = 'Show';
+        
+        // Limit stack trace display to prevent performance issues
+        const stackContainer = document.createElement('pre');
+        stackContainer.classList.add('grim-inspector-code');
+        stackContainer.style.display = 'none';
+        stackContainer.style.maxHeight = '200px';
+        stackContainer.style.overflow = 'auto';
+        
+        // Determine if stack trace is very long
+        const isVeryLong = error.stack.length > 1000;
+        
+        // For very long stack traces, use a more efficient approach
+        if (isVeryLong) {
+          stackContainer.textContent = error.stack.substring(0, 1000) + '...\n\n(Stack trace truncated for performance)';
+          
+          // Add a "view full" button for long stack traces
+          const viewFullButton = document.createElement('button');
+          viewFullButton.classList.add('grim-inspector-btn', 'grim-inspector-btn-ghost');
+          viewFullButton.textContent = 'View Full Stack';
+          viewFullButton.style.fontSize = '10px';
+          viewFullButton.style.marginTop = '5px';
+          viewFullButton.addEventListener('click', (e) => {
+            e.stopPropagation();
+            stackContainer.textContent = error.stack;
+            viewFullButton.style.display = 'none';
+          });
+          
+          const buttonContainer = document.createElement('div');
+          buttonContainer.style.textAlign = 'center';
+          buttonContainer.appendChild(viewFullButton);
+          
+          stackContainer.appendChild(buttonContainer);
+        } else {
+          stackContainer.textContent = error.stack;
+        }
+        
+        stackHeader.addEventListener('click', () => {
+          if (stackContainer.style.display === 'none') {
+            stackContainer.style.display = 'block';
+            toggleButton.textContent = 'Hide';
+          } else {
+            stackContainer.style.display = 'none';
+            toggleButton.textContent = 'Show';
+          }
+        });
+        
+        stackHeader.appendChild(stackLabel);
+        stackHeader.appendChild(toggleButton);
         
         message.appendChild(stackHeader);
         message.appendChild(stackContainer);
@@ -1103,41 +1571,103 @@ class GrimInspector {
     const toolbar = document.createElement('div');
     toolbar.classList.add('grim-inspector-toolbar');
     toolbar.style.display = 'flex';
-    toolbar.style.justifyContent = 'flex-end';
+    toolbar.style.justifyContent = 'space-between';
     toolbar.style.marginBottom = '10px';
+    
+    // Add pagination info
+    const pageInfo = document.createElement('div');
+    pageInfo.style.fontSize = '12px';
+    pageInfo.style.color = '#6b7280';
+    
+    // Only show a page of network requests at a time - max 15 at a time
+    const MAX_REQUESTS_PER_PAGE = 15;
+    const totalRequests = this.network.length;
+    const totalPages = Math.ceil(totalRequests / MAX_REQUESTS_PER_PAGE);
+    
+    // Add pagination state
+    if (!this._networkPagination) {
+      this._networkPagination = { currentPage: 1 };
+    }
+    
+    // Ensure current page is valid
+    if (this._networkPagination.currentPage > totalPages) {
+      this._networkPagination.currentPage = 1;
+    }
+    
+    const currentPage = this._networkPagination.currentPage;
+    
+    if (totalRequests > MAX_REQUESTS_PER_PAGE) {
+      pageInfo.textContent = `Showing ${MAX_REQUESTS_PER_PAGE} of ${totalRequests} requests (Page ${currentPage}/${totalPages})`;
+      toolbar.appendChild(pageInfo);
+    }
+    
+    // Add pagination controls if needed
+    if (totalPages > 1) {
+      const paginationControls = document.createElement('div');
+      paginationControls.style.display = 'flex';
+      paginationControls.style.gap = '8px';
+      paginationControls.style.marginRight = '10px';
+      
+      const prevButton = document.createElement('button');
+      prevButton.classList.add('grim-inspector-btn', 'grim-inspector-btn-ghost');
+      prevButton.textContent = '← Prev';
+      prevButton.style.fontSize = '12px';
+      prevButton.style.padding = '4px 8px';
+      prevButton.disabled = currentPage === 1;
+      prevButton.style.opacity = currentPage === 1 ? '0.5' : '1';
+      prevButton.addEventListener('click', () => {
+        if (currentPage > 1) {
+          this._networkPagination.currentPage--;
+          this.renderNetworkTab(contentElement, emptyState);
+        }
+      });
+      
+      const nextButton = document.createElement('button');
+      nextButton.classList.add('grim-inspector-btn', 'grim-inspector-btn-ghost');
+      nextButton.textContent = 'Next →';
+      nextButton.style.fontSize = '12px';
+      nextButton.style.padding = '4px 8px';
+      nextButton.disabled = currentPage === totalPages;
+      nextButton.style.opacity = currentPage === totalPages ? '0.5' : '1';
+      nextButton.addEventListener('click', () => {
+        if (currentPage < totalPages) {
+          this._networkPagination.currentPage++;
+          this.renderNetworkTab(contentElement, emptyState);
+        }
+      });
+      
+      paginationControls.appendChild(prevButton);
+      paginationControls.appendChild(nextButton);
+      toolbar.appendChild(paginationControls);
+    }
     
     const clearButton = document.createElement('button');
     clearButton.classList.add('grim-inspector-btn', 'grim-inspector-btn-ghost');
-    clearButton.textContent = 'Clear Network';
+    clearButton.textContent = 'Clear Requests';
     clearButton.addEventListener('click', () => {
       this.network = [];
+      this._networkPagination = { currentPage: 1 };
       this.refreshTabContent('network');
     });
     
     toolbar.appendChild(clearButton);
     contentElement.appendChild(toolbar);
     
-    // Create network container
+    // Create network entries container
     const networkContainer = document.createElement('div');
     networkContainer.classList.add('grim-inspector-network-container');
     
+    // Calculate slice of network requests to show based on current page
+    const startIndex = (currentPage - 1) * MAX_REQUESTS_PER_PAGE;
+    const endIndex = Math.min(startIndex + MAX_REQUESTS_PER_PAGE, totalRequests);
+    
+    // Only render visible network requests for current page
+    const visibleRequests = this.network.slice().reverse().slice(startIndex, endIndex);
+    
     // Add each network entry
-    this.network.slice().reverse().forEach(req => {
+    visibleRequests.forEach(request => {
       const entry = document.createElement('div');
       entry.classList.add('grim-inspector-entry');
-      
-      // Add status-based styling
-      if (req.status) {
-        if (req.status >= 400) {
-          entry.classList.add('grim-inspector-entry-error');
-        } else if (req.status >= 300) {
-          entry.classList.add('grim-inspector-entry-warning');
-        } else if (req.status >= 200) {
-          entry.style.borderLeftColor = 'var(--success-color)';
-        }
-      } else if (req.status === 0) {
-        entry.classList.add('grim-inspector-entry-error');
-      }
       
       const header = document.createElement('div');
       header.style.display = 'flex';
@@ -1145,95 +1675,126 @@ class GrimInspector {
       header.style.alignItems = 'center';
       header.style.marginBottom = '5px';
       
-      const typeContainer = document.createElement('div');
-      typeContainer.style.display = 'flex';
-      typeContainer.style.alignItems = 'center';
+      const methodStatus = document.createElement('div');
+      methodStatus.style.display = 'flex';
+      methodStatus.style.alignItems = 'center';
       
-      const methodSpan = document.createElement('span');
-      methodSpan.style.fontWeight = 'bold';
-      methodSpan.style.marginRight = '8px';
-      methodSpan.style.textTransform = 'uppercase';
-      methodSpan.textContent = req.method;
+      const methodBadge = document.createElement('span');
+      methodBadge.style.fontFamily = "'Fira Code', monospace";
+      methodBadge.style.fontSize = '10px';
+      methodBadge.style.fontWeight = '600';
+      methodBadge.style.backgroundColor = 'rgba(59, 130, 246, 0.1)';
+      methodBadge.style.color = '#3b82f6';
+      methodBadge.style.borderRadius = '4px';
+      methodBadge.style.padding = '2px 6px';
+      methodBadge.style.marginRight = '8px';
+      methodBadge.textContent = request.method;
       
-      switch (req.method.toUpperCase()) {
-        case 'GET':
-          methodSpan.style.color = '#3b82f6';
-          break;
-        case 'POST':
-          methodSpan.style.color = '#10b981';
-          break;
-        case 'PUT':
-          methodSpan.style.color = '#f59e0b';
-          break;
-        case 'DELETE':
-          methodSpan.style.color = '#ef4444';
-          break;
-        default:
-          methodSpan.style.color = '#6b7280';
-      }
+      const statusBadge = document.createElement('span');
+      statusBadge.style.marginRight = '8px';
+      statusBadge.style.borderRadius = '4px';
+      statusBadge.style.padding = '2px 6px';
+      statusBadge.style.fontSize = '10px';
+      statusBadge.style.fontWeight = '600';
       
-      const statusSpan = document.createElement('span');
-      statusSpan.style.marginRight = '8px';
-      statusSpan.style.borderRadius = '4px';
-      statusSpan.style.padding = '2px 6px';
-      statusSpan.style.fontSize = '10px';
-      statusSpan.style.fontWeight = '600';
-      
-      if (req.status) {
-        statusSpan.textContent = String(req.status);
+      if (request.status) {
+        statusBadge.textContent = String(request.status);
         
-        if (req.status >= 400) {
-          statusSpan.style.backgroundColor = 'rgba(239, 68, 68, 0.1)';
-          statusSpan.style.color = '#ef4444';
-        } else if (req.status >= 300) {
-          statusSpan.style.backgroundColor = 'rgba(245, 158, 11, 0.1)';
-          statusSpan.style.color = '#f59e0b';
-        } else if (req.status >= 200) {
-          statusSpan.style.backgroundColor = 'rgba(16, 185, 129, 0.1)';
-          statusSpan.style.color = '#10b981';
+        if (request.status >= 400) {
+          statusBadge.style.backgroundColor = 'rgba(239, 68, 68, 0.1)';
+          statusBadge.style.color = '#ef4444';
+        } else if (request.status >= 300) {
+          statusBadge.style.backgroundColor = 'rgba(245, 158, 11, 0.1)';
+          statusBadge.style.color = '#f59e0b';
+        } else if (request.status >= 200) {
+          statusBadge.style.backgroundColor = 'rgba(16, 185, 129, 0.1)';
+          statusBadge.style.color = '#10b981';
         } else {
-          statusSpan.style.backgroundColor = 'rgba(107, 114, 128, 0.1)';
-          statusSpan.style.color = '#6b7280';
+          statusBadge.style.backgroundColor = 'rgba(107, 114, 128, 0.1)';
+          statusBadge.style.color = '#6b7280';
         }
-      } else if (req.status === 0) {
-        statusSpan.textContent = 'ERROR';
-        statusSpan.style.backgroundColor = 'rgba(239, 68, 68, 0.1)';
-        statusSpan.style.color = '#ef4444';
+      } else if (request.status === 0) {
+        statusBadge.textContent = 'ERROR';
+        statusBadge.style.backgroundColor = 'rgba(239, 68, 68, 0.1)';
+        statusBadge.style.color = '#ef4444';
       } else {
-        statusSpan.textContent = 'PENDING';
-        statusSpan.style.backgroundColor = 'rgba(107, 114, 128, 0.1)';
-        statusSpan.style.color = '#6b7280';
+        statusBadge.textContent = 'PENDING';
+        statusBadge.style.backgroundColor = 'rgba(107, 114, 128, 0.1)';
+        statusBadge.style.color = '#6b7280';
       }
       
-      typeContainer.appendChild(methodSpan);
-      typeContainer.appendChild(statusSpan);
+      methodStatus.appendChild(methodBadge);
+      methodStatus.appendChild(statusBadge);
       
       const timeSpan = document.createElement('span');
       timeSpan.style.fontSize = '10px';
       timeSpan.style.color = '#6b7280';
-      const reqTime = new Date(req.timestamp);
-      timeSpan.textContent = reqTime.toLocaleTimeString();
+      const requestTime = new Date(request.timestamp);
+      timeSpan.textContent = requestTime.toLocaleTimeString();
       
-      header.appendChild(typeContainer);
+      header.appendChild(methodStatus);
       header.appendChild(timeSpan);
       
-      const urlContainer = document.createElement('div');
-      urlContainer.style.marginBottom = '5px';
-      urlContainer.style.wordBreak = 'break-all';
-      urlContainer.style.fontFamily = "'Fira Code', monospace";
-      urlContainer.style.fontSize = '12px';
-      urlContainer.textContent = req.url;
+      // Display the URL with max length to prevent very long URLs from breaking layout
+      const url = document.createElement('div');
+      url.style.marginBottom = '5px';
+      url.style.wordBreak = 'break-all';
+      url.style.fontFamily = "'Fira Code', monospace";
+      url.style.fontSize = '12px';
       
-      const details = document.createElement('div');
-      details.style.fontSize = '12px';
-      details.style.display = 'flex';
-      details.style.flexWrap = 'wrap';
-      details.style.gap = '8px';
+      // Trim very long URLs for display purposes
+      const MAX_URL_LENGTH = 200;
+      if (request.url.length > MAX_URL_LENGTH) {
+        const trimmedUrl = request.url.substring(0, MAX_URL_LENGTH) + '...';
+        
+        // Create a tooltip element for hover
+        url.title = request.url;
+        url.textContent = trimmedUrl;
+        url.style.cursor = 'pointer';
+        
+        // Add a "copy full URL" button for very long URLs
+        const copyUrlBtn = document.createElement('button');
+        copyUrlBtn.classList.add('grim-inspector-btn', 'grim-inspector-btn-ghost');
+        copyUrlBtn.textContent = 'Copy Full URL';
+        copyUrlBtn.style.fontSize = '10px';
+        copyUrlBtn.style.padding = '2px 6px';
+        copyUrlBtn.style.marginLeft = '8px';
+        copyUrlBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          navigator.clipboard.writeText(request.url)
+            .then(() => {
+              const originalText = copyUrlBtn.textContent;
+              copyUrlBtn.textContent = 'Copied!';
+              setTimeout(() => {
+                copyUrlBtn.textContent = originalText;
+              }, 1000);
+            });
+        });
+        
+        const urlContainer = document.createElement('div');
+        urlContainer.style.display = 'flex';
+        urlContainer.style.alignItems = 'center';
+        urlContainer.appendChild(url);
+        urlContainer.appendChild(copyUrlBtn);
+        
+        entry.appendChild(header);
+        entry.appendChild(urlContainer);
+      } else {
+        url.textContent = request.url;
+        entry.appendChild(header);
+        entry.appendChild(url);
+      }
+      
+      // Add metadata (duration, content type, etc.)
+      const metadata = document.createElement('div');
+      metadata.style.fontSize = '12px';
+      metadata.style.display = 'flex';
+      metadata.style.flexWrap = 'wrap';
+      metadata.style.gap = '8px';
       
       // Add duration if available
-      if (req.duration !== undefined) {
+      if (request.duration !== undefined) {
         const durationItem = document.createElement('div');
-        
         const durationLabel = document.createElement('span');
         durationLabel.style.fontWeight = '500';
         durationLabel.style.color = '#4b5563';
@@ -1242,42 +1803,169 @@ class GrimInspector {
         
         const durationValue = document.createElement('span');
         durationValue.style.fontFamily = "'Fira Code', monospace";
-        durationValue.textContent = `${Math.round(req.duration)}ms`;
+        durationValue.textContent = `${Math.round(request.duration)}ms`;
         
         durationItem.appendChild(durationLabel);
         durationItem.appendChild(durationValue);
-        
-        details.appendChild(durationItem);
+        metadata.appendChild(durationItem);
       }
       
       // Add content type if available
-      if (req.contentType) {
-        const typeItem = document.createElement('div');
+      if (request.contentType) {
+        const contentTypeItem = document.createElement('div');
+        const contentTypeLabel = document.createElement('span');
+        contentTypeLabel.style.fontWeight = '500';
+        contentTypeLabel.style.color = '#4b5563';
+        contentTypeLabel.style.marginRight = '4px';
+        contentTypeLabel.textContent = 'Content-Type:';
         
-        const typeLabel = document.createElement('span');
-        typeLabel.style.fontWeight = '500';
-        typeLabel.style.color = '#4b5563';
-        typeLabel.style.marginRight = '4px';
-        typeLabel.textContent = 'Content-Type:';
+        const contentTypeValue = document.createElement('span');
+        contentTypeValue.style.fontFamily = "'Fira Code', monospace";
         
-        const typeValue = document.createElement('span');
-        typeValue.style.fontFamily = "'Fira Code', monospace";
-        typeValue.textContent = req.contentType;
+        // Shorten very long content types
+        if (request.contentType.length > 30) {
+          contentTypeValue.textContent = request.contentType.substring(0, 30) + '...';
+          contentTypeValue.title = request.contentType;
+        } else {
+          contentTypeValue.textContent = request.contentType;
+        }
         
-        typeItem.appendChild(typeLabel);
-        typeItem.appendChild(typeValue);
-        
-        details.appendChild(typeItem);
+        contentTypeItem.appendChild(contentTypeLabel);
+        contentTypeItem.appendChild(contentTypeValue);
+        metadata.appendChild(contentTypeItem);
       }
       
-      entry.appendChild(header);
-      entry.appendChild(urlContainer);
-      entry.appendChild(details);
+      // Add data preview with toggle button
+      if (request.requestData || request.responseData) {
+        const toggleContainer = document.createElement('div');
+        toggleContainer.style.marginTop = '8px';
+        
+        const toggleButton = document.createElement('button');
+        toggleButton.classList.add('grim-inspector-btn', 'grim-inspector-btn-ghost');
+        toggleButton.textContent = 'Show Details';
+        toggleButton.style.fontSize = '11px';
+        
+        const detailsContainer = document.createElement('div');
+        detailsContainer.style.display = 'none';
+        detailsContainer.style.marginTop = '8px';
+        
+        toggleButton.addEventListener('click', () => {
+          if (detailsContainer.style.display === 'none') {
+            detailsContainer.style.display = 'block';
+            toggleButton.textContent = 'Hide Details';
+          } else {
+            detailsContainer.style.display = 'none';
+            toggleButton.textContent = 'Show Details';
+          }
+        });
+        
+        toggleContainer.appendChild(toggleButton);
+        
+        // Add request data if available
+        if (request.requestData) {
+          const requestDataContainer = document.createElement('div');
+          requestDataContainer.style.marginBottom = '8px';
+          
+          const requestDataHeader = document.createElement('div');
+          requestDataHeader.style.fontSize = '11px';
+          requestDataHeader.style.fontWeight = '500';
+          requestDataHeader.style.marginBottom = '4px';
+          requestDataHeader.style.color = '#4b5563';
+          requestDataHeader.textContent = 'Request Data:';
+          
+          const requestDataContent = document.createElement('pre');
+          requestDataContent.classList.add('grim-inspector-code');
+          requestDataContent.style.maxHeight = '150px';
+          requestDataContent.style.overflow = 'auto';
+          
+          try {
+            // Format and limit request data for performance
+            const formattedData = this.formatNetworkData(request.requestData);
+            requestDataContent.textContent = formattedData;
+          } catch (e) {
+            requestDataContent.textContent = String(request.requestData);
+          }
+          
+          requestDataContainer.appendChild(requestDataHeader);
+          requestDataContainer.appendChild(requestDataContent);
+          detailsContainer.appendChild(requestDataContainer);
+        }
+        
+        // Add response data if available
+        if (request.responseData) {
+          const responseDataContainer = document.createElement('div');
+          
+          const responseDataHeader = document.createElement('div');
+          responseDataHeader.style.fontSize = '11px';
+          responseDataHeader.style.fontWeight = '500';
+          responseDataHeader.style.marginBottom = '4px';
+          responseDataHeader.style.color = '#4b5563';
+          responseDataHeader.textContent = 'Response Data:';
+          
+          const responseDataContent = document.createElement('pre');
+          responseDataContent.classList.add('grim-inspector-code');
+          responseDataContent.style.maxHeight = '150px';
+          responseDataContent.style.overflow = 'auto';
+          
+          try {
+            // Format and limit response data for performance
+            const formattedData = this.formatNetworkData(request.responseData);
+            responseDataContent.textContent = formattedData;
+          } catch (e) {
+            responseDataContent.textContent = String(request.responseData);
+          }
+          
+          responseDataContainer.appendChild(responseDataHeader);
+          responseDataContainer.appendChild(responseDataContent);
+          detailsContainer.appendChild(responseDataContainer);
+        }
+        
+        entry.appendChild(metadata);
+        entry.appendChild(toggleContainer);
+        entry.appendChild(detailsContainer);
+      } else {
+        entry.appendChild(metadata);
+      }
       
       networkContainer.appendChild(entry);
     });
     
     contentElement.appendChild(networkContainer);
+  }
+  
+  // Helper to format network data while preventing large objects from freezing the browser
+  private formatNetworkData(data: any): string {
+    if (typeof data === 'string') {
+      try {
+        // Try to parse as JSON if it's a string
+        const parsedData = JSON.parse(data);
+        const jsonString = JSON.stringify(parsedData, null, 2);
+        
+        // Truncate very large response bodies
+        if (jsonString.length > 5000) {
+          return jsonString.substring(0, 5000) + '\n\n... (truncated for performance)';
+        }
+        return jsonString;
+      } catch (e) {
+        // If not valid JSON, just return the string
+        if (data.length > 5000) {
+          return data.substring(0, 5000) + '\n\n... (truncated for performance)';
+        }
+        return data;
+      }
+    } else if (typeof data === 'object' && data !== null) {
+      try {
+        const jsonString = JSON.stringify(data, null, 2);
+        if (jsonString.length > 5000) {
+          return jsonString.substring(0, 5000) + '\n\n... (truncated for performance)';
+        }
+        return jsonString;
+      } catch (e) {
+        return '[Complex object - cannot display]';
+      }
+    }
+    
+    return String(data);
   }
   
   private renderMetricsTab(contentElement: HTMLElement, emptyState: HTMLElement): void {
